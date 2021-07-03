@@ -1,5 +1,14 @@
 <?php
 
+declare(strict_types=1);
+
+namespace SimpleSAML\Metadata;
+
+use SimpleSAML\Assert\Assert;
+use SimpleSAML\Error;
+use SimpleSAML\Module;
+use SimpleSAML\Utils;
+
 /**
  * This abstract class defines an interface for metadata storage sources.
  *
@@ -7,222 +16,346 @@
  * A metadata storage source can be loaded by passing the configuration of it
  * to the getSource static function.
  *
- * @author Olav Morken, UNINETT AS.
- * @author Andreas Aakre Solberg, UNINETT AS.
- * @package simpleSAMLphp
+ * @package SimpleSAMLphp
  */
-abstract class SimpleSAML_Metadata_MetaDataStorageSource {
+
+abstract class MetaDataStorageSource
+{
+    /**
+     * Parse array with metadata sources.
+     *
+     * This function accepts an array with metadata sources, and returns an array with
+     * each metadata source as an object.
+     *
+     * @param array $sourcesConfig Array with metadata source configuration.
+     *
+     * @return array  Parsed metadata configuration.
+     *
+     * @throws \Exception If something is wrong in the configuration.
+     */
+    public static function parseSources(array $sourcesConfig): array
+    {
+        $sources = [];
+
+        foreach ($sourcesConfig as $sourceConfig) {
+            if (!is_array($sourceConfig)) {
+                throw new \Exception("Found an element in metadata source configuration which wasn't an array.");
+            }
+
+            $sources[] = self::getSource($sourceConfig);
+        }
+
+        return $sources;
+    }
 
 
-	/**
-	 * Parse array with metadata sources.
-	 *
-	 * This function accepts an array with metadata sources, and returns an array with
-	 * each metadata source as an object.
-	 *
-	 * @param array $sourcesConfig  Array with metadata source configuration.
-	 * @return array  Parsed metadata configuration.
-	 */
-	public static function parseSources($sourcesConfig) {
-		assert('is_array($sourcesConfig)');
+    /**
+     * This function creates a metadata source based on the given configuration.
+     * The type of source is based on the 'type' parameter in the configuration.
+     * The default type is 'flatfile'.
+     *
+     * @param array $sourceConfig Associative array with the configuration for this metadata source.
+     *
+     * @return \SimpleSAML\Metadata\MetaDataStorageSource An instance of a metadata source with the given configuration.
+     *
+     * @throws \Exception If the metadata source type is invalid.
+     */
+    public static function getSource(array $sourceConfig): MetaDataStorageSource
+    {
+        if (array_key_exists('type', $sourceConfig)) {
+            $type = $sourceConfig['type'];
+        } else {
+            $type = 'flatfile';
+        }
 
-		$sources = array();
+        switch ($type) {
+            case 'flatfile':
+                return new MetaDataStorageHandlerFlatFile($sourceConfig);
+            case 'xml':
+                return new MetaDataStorageHandlerXML($sourceConfig);
+            case 'serialize':
+                return new MetaDataStorageHandlerSerialize($sourceConfig);
+            case 'mdx':
+            case 'mdq':
+                return new Sources\MDQ($sourceConfig);
+            case 'pdo':
+                return new MetaDataStorageHandlerPdo($sourceConfig);
+            default:
+                // metadata store from module
+                try {
+                    $className = Module::resolveClass(
+                        $type,
+                        'MetadataStore',
+                        '\SimpleSAML\Metadata\MetaDataStorageSource'
+                    );
+                } catch (\Exception $e) {
+                    throw new Error\CriticalConfigurationError(
+                        "Invalid 'type' for metadata source. Cannot find store '$type'.",
+                        null
+                    );
+                }
 
-		foreach ($sourcesConfig as $sourceConfig) {
-			if (!is_array($sourceConfig)) {
-				throw new Exception('Found an element in metadata source' .
-					' configuration which wasn\'t an array.');
-			}
-
-			$sources[] = self::getSource($sourceConfig);
-		}
-
-		return $sources;
-	}
-
-
-	/**
-	 * This function creates a metadata source based on the given configuration.
-	 * The type of source is based on the 'type' parameter in the configuration.
-	 * The default type is 'flatfile'.
-	 *
-	 * @param $sourceConfig  Associative array with the configuration for this metadata source.
-	 * @return An instance of a metadata source with the given configuration.
-	 */
-	public static function getSource($sourceConfig) {
-
-		assert(is_array($sourceConfig));
-
-		if(array_key_exists('type', $sourceConfig)) {
-			$type = $sourceConfig['type'];
-		} else {
-			$type = 'flatfile';
-		}
-
-		switch($type) {
-			case 'flatfile':
-				return new SimpleSAML_Metadata_MetaDataStorageHandlerFlatFile($sourceConfig);
-			case 'xml':
-				return new SimpleSAML_Metadata_MetaDataStorageHandlerXML($sourceConfig);
-			case 'dynamicxml':
-				return new SimpleSAML_Metadata_MetaDataStorageHandlerDynamicXML($sourceConfig);
-			case 'serialize':
-				return new SimpleSAML_Metadata_MetaDataStorageHandlerSerialize($sourceConfig);
-			default:
-				throw new Exception('Invalid metadata source type: "' . $type . '".');
-		}
-	}
+                /** @var \SimpleSAML\Metadata\MetaDataStorageSource */
+                return new $className($sourceConfig);
+        }
+    }
 
 
-	/**
-	 * This function attempts to generate an associative array with metadata for all entities in the
-	 * given set. The key of the array is the entity id.
-	 *
-	 * A subclass should override this function if it is able to easily generate this list.
-	 *
-	 * @param $set  The set we want to list metadata for.
-	 * @return An associative array with all entities in the given set, or an empty array if we are
-	 *         unable to generate this list.
-	 */
-	public function getMetadataSet($set) {
-		return array();
-	}
+    /**
+     * This function attempts to generate an associative array with metadata for all entities in the
+     * given set. The key of the array is the entity id.
+     *
+     * A subclass should override this function if it is able to easily generate this list.
+     *
+     * @param string $set The set we want to list metadata for.
+     *
+     * @return array An associative array with all entities in the given set, or an empty array if we are
+     *         unable to generate this list.
+     */
+    public function getMetadataSet(string $set): array
+    {
+        return [];
+    }
 
 
-	/**
-	 * This function resolves an host/path combination to an entity id.
-	 *
-	 * This class implements this function using the getMetadataSet-function. A subclass should
-	 * override this function if it doesn't implement the getMetadataSet function, or if the
-	 * implementation of getMetadataSet is slow.
-	 *
-	 * @param $hostPath  The host/path combination we are looking up.
-	 * @param $set  Which set of metadata we are looking it up in.
-	 * @param $type Do you want to return the metaindex or the entityID. [entityid|metaindex]
+    /**
+     * This function resolves an host/path combination to an entity id.
+     *
+     * This class implements this function using the getMetadataSet-function. A subclass should
+     * override this function if it doesn't implement the getMetadataSet function, or if the
+     * implementation of getMetadataSet is slow.
+     *
+     * @param string $hostPath The host/path combination we are looking up.
+     * @param string $set Which set of metadata we are looking it up in.
+     * @param string $type Do you want to return the metaindex or the entityID. [entityid|metaindex]
+     *
+     * @return string|null An entity id which matches the given host/path combination, or NULL if
+     *         we are unable to locate one which matches.
+     */
+    public function getEntityIdFromHostPath(string $hostPath, string $set, string $type = 'entityid'): ?string
+    {
+        $metadataSet = $this->getMetadataSet($set);
 
-	 * @return An entity id which matches the given host/path combination, or NULL if
-	 *         we are unable to locate one which matches.
-	 */
-	public function getEntityIdFromHostPath($hostPath, $set, $type = 'entityid') {
+        foreach ($metadataSet as $index => $entry) {
+            if (!array_key_exists('host', $entry)) {
+                continue;
+            }
 
-		$metadataSet = $this->getMetadataSet($set);
-		if ($metadataSet === NULL) {
-			/* This metadata source does not have this metadata set. */
-			return NULL;
-		}
+            if ($hostPath === $entry['host']) {
+                if ($type === 'entityid') {
+                    return $entry['entityid'];
+                } else {
+                    return $index;
+                }
+            }
+        }
 
-		foreach($metadataSet AS $index => $entry) {
+        // no entries matched, we should return null
+        return null;
+    }
 
-			if(!array_key_exists('host', $entry)) {
-				continue;
-			}
 
-			if($hostPath === $entry['host']) {
-				if ($type === 'entityid') {
-					return $entry['entityid'];
-				} else {
-					return $index;
-				}	
-			}
-		}
+    /**
+     * This function will go through all the metadata, and check the DiscoHints->IPHint
+     * parameter, which defines a network space (ip range) for each remote entry.
+     * This function returns the entityID for any of the entities that have an
+     * IP range which the IP falls within.
+     *
+     * @param string $set Which set of metadata we are looking it up in.
+     * @param string $ip IP address
+     * @param string $type Do you want to return the metaindex or the entityID. [entityid|metaindex]
+     *
+     * @return string|null The entity id of a entity which have a CIDR hint where the provided
+     *        IP address match.
+     */
+    public function getPreferredEntityIdFromCIDRhint(string $set, string $ip, string $type = 'entityid'): ?string
+    {
+        $metadataSet = $this->getMetadataSet($set);
 
-		/* No entries matched - we should return NULL. */
-		return NULL;
-	}
-	
-	/**
-	 * This function will go through all the metadata, and check the hint.cidr
-	 * parameter, which defines a network space (ip range) for each remote entry.
-	 * This function returns the entityID for any of the entities that have an 
-	 * IP range which the IP falls within.
-	 *
-	 * @param $set  Which set of metadata we are looking it up in.
-	 * @param $ip	IP address
-	 * @param $type Do you want to return the metaindex or the entityID. [entityid|metaindex]
-	 * @return The entity id of a entity which have a CIDR hint where the provided
-	 * 		IP address match.
-	 */
-	public function getPreferredEntityIdFromCIDRhint($set, $ip, $type = 'entityid') {
-		
-		$metadataSet = $this->getMetadataSet($set);
+        foreach ($metadataSet as $index => $entry) {
+            $cidrHints = [];
 
-		foreach($metadataSet AS $index => $entry) {
+            // support hint.cidr for idp discovery
+            if (array_key_exists('hint.cidr', $entry) && is_array($entry['hint.cidr'])) {
+                $cidrHints = $entry['hint.cidr'];
+            }
 
-			if(!array_key_exists('hint.cidr', $entry)) continue;
-			if(!is_array($entry['hint.cidr'])) continue;
-			
-			foreach ($entry['hint.cidr'] AS $hint_entry) {
-				if (SimpleSAML_Utilities::ipCIDRcheck($hint_entry, $ip)) {
-					if ($type === 'entityid') {
-						return $entry['entityid'];
-					} else {
-						return $index;
-					}		
-				}
-			}
+            // support discohints in idp metadata for idp discovery
+            if (
+                array_key_exists('DiscoHints', $entry)
+                && array_key_exists('IPHint', $entry['DiscoHints'])
+                && is_array($entry['DiscoHints']['IPHint'])
+            ) {
+                // merge with hints derived from discohints, but prioritize hint.cidr in case it is used
+                $cidrHints = array_merge($entry['DiscoHints']['IPHint'], $cidrHints);
+            }
 
-		}
+            if (empty($cidrHints)) {
+                continue;
+            }
 
-		/* No entries matched - we should return NULL. */
-		return NULL;
-	}
+            $netUtils = new Utils\Net();
+            foreach ($cidrHints as $hint_entry) {
+                if ($netUtils->ipCIDRcheck($hint_entry, $ip)) {
+                    if ($type === 'entityid') {
+                        return $entry['entityid'];
+                    } else {
+                        return $index;
+                    }
+                }
+            }
+        }
 
-	/*
-	 *
-	 */
-	private function lookupIndexFromEntityId($entityId, $set) {
+        // no entries matched, we should return null
+        return null;
+    }
 
-		assert('is_string($entityId)');
-		assert('isset($set)');
 
-		$metadataSet = $this->getMetadataSet($set);
+    /**
+     * This function retrieves metadata for the given entity id in the given set of metadata.
+     * It will return NULL if it is unable to locate the metadata.
+     *
+     * This class implements this function using the getMetadataSet-function. A subclass should
+     * override this function if it doesn't implement the getMetadataSet function, or if the
+     * implementation of getMetadataSet is slow.
+     *
+     * @param string $entityId The entityId or metaindex we are looking up.
+     * @param string $set The set we are looking for metadata in.
+     *
+     * @return array|null An associative array with metadata for the given entity, or NULL if we are unable to
+     *         locate the entity.
+     */
+    public function getMetaData(string $entityId, string $set): ?array
+    {
+        $metadataSet = $this->getMetadataSet($set);
 
-		/* Check for hostname. */
-		$currenthost = SimpleSAML_Utilities::getSelfHost(); // sp.example.org
-		if(strpos($currenthost, ":") !== FALSE) {
-			$currenthostdecomposed = explode(":", $currenthost);
-			$currenthost = $currenthostdecomposed[0];
-		}
-		
-		foreach($metadataSet AS $index => $entry) {
-			if ($index === $entityId) return $index;
-			if ($entry['entityid'] === $entityId) {
-				if ($entry['host'] === '__DEFAULT__' || $entry['host'] === $currenthost) return $index;
-			}
-		}
-		
-		return NULL;
-	}
+        $indexLookup = $this->lookupIndexFromEntityId($entityId, $metadataSet);
+        if (isset($indexLookup) && array_key_exists($indexLookup, $metadataSet)) {
+            return $metadataSet[$indexLookup];
+        }
 
-	/**
-	 * This function retrieves metadata for the given entity id in the given set of metadata.
-	 * It will return NULL if it is unable to locate the metadata.
-	 *
-	 * This class implements this function using the getMetadataSet-function. A subclass should
-	 * override this function if it doesn't implement the getMetadataSet function, or if the
-	 * implementation of getMetadataSet is slow.
-	 *
-	 * @param $index  The entityId or metaindex we are looking up.
-	 * @param $set  The set we are looking for metadata in.
-	 * @return An associative array with metadata for the given entity, or NULL if we are unable to
-	 *         locate the entity.
-	 */
-	public function getMetaData($index, $set) {
+        return null;
+    }
 
-		assert('is_string($index)');
-		assert('isset($set)');
 
-		$metadataSet = $this->getMetadataSet($set);
+    /**
+     * This function loads the metadata for entity IDs in $entityIds. It is returned as an associative array
+     * where the key is the entity id. An empty array may be returned if no matching entities were found.
+     * Subclasses should override if their getMetadataSet returns nothing or is slow. Subclasses may want to
+     * delegate to getMetaDataForEntitiesIndividually if loading entities one at a time is faster.
+     * @param string[] $entityIds The entity ids to load
+     * @param string $set The set we want to get metadata from.
+     * @return array An associative array with the metadata for the requested entities, if found.
+     */
+    public function getMetaDataForEntities(array $entityIds, string $set): array
+    {
+        if (count($entityIds) === 1) {
+            return $this->getMetaDataForEntitiesIndividually($entityIds, $set);
+        }
+        $entities = $this->getMetadataSet($set);
+        return array_intersect_key($entities, array_flip($entityIds));
+    }
 
-		if(array_key_exists($index, $metadataSet))
-			return $metadataSet[$index];
 
-		$indexlookup = $this->lookupIndexFromEntityId($index, $set);
-		if (isset($indexlookup) && array_key_exists($indexlookup, $metadataSet)) 
-			return $metadataSet[$indexlookup];
+    /**
+     * Loads metadata entities one at a time, rather than the default implementation of loading all entities
+     * and filtering.
+     * @see MetaDataStorageSource::getMetaDataForEntities()
+     * @param string[] $entityIds The entity ids to load
+     * @param string $set The set we want to get metadata from.
+     * @return array An associative array with the metadata for the requested entities, if found.
+     */
+    protected function getMetaDataForEntitiesIndividually(array $entityIds, string $set): array
+    {
+        $entities = [];
+        foreach ($entityIds as $entityId) {
+            $metadata = $this->getMetaData($entityId, $set);
+            if ($metadata !== null) {
+                $entities[$entityId] = $metadata;
+            }
+        }
+        return $entities;
+    }
 
-		return NULL;
-	}
 
+    /**
+     * This method returns the full metadata set for a given entity id or null if the entity id cannot be found
+     * in the given metadata set.
+     *
+     * @param string $entityId
+     * @param array $metadataSet the already loaded metadata set
+     * @return mixed|null
+     */
+    protected function lookupIndexFromEntityId(string $entityId, array $metadataSet)
+    {
+        // check for hostname
+        $httpUtils = new Utils\HTTP();
+        $currentHost = $httpUtils->getSelfHost(); // sp.example.org
+
+        foreach ($metadataSet as $index => $entry) {
+            // explicit index match
+            if ($index === $entityId) {
+                return $index;
+            }
+
+            if ($entry['entityid'] === $entityId) {
+                if ($entry['host'] === '__DEFAULT__' || $entry['host'] === $currentHost) {
+                    return $index;
+                }
+            }
+        }
+
+        return null;
+    }
+
+
+    /**
+     * @param string $set
+     * @throws \Exception
+     * @return string
+     */
+    private function getDynamicHostedUrl(string $set): string
+    {
+        // get the configuration
+        $httpUtils = new Utils\HTTP();
+        $baseUrl = $httpUtils->getBaseURL();
+
+        if ($set === 'saml20-idp-hosted') {
+            return $baseUrl . 'saml2/idp/metadata.php';
+        } elseif ($set === 'saml20-sp-hosted') {
+            return $baseUrl . 'saml2/sp/metadata.php';
+        } elseif ($set === 'adfs-idp-hosted') {
+            return 'urn:federation:' . $httpUtils->getSelfHost() . ':idp';
+        } else {
+            throw new \Exception('Can not generate dynamic EntityID for metadata of this type: [' . $set . ']');
+        }
+    }
+
+
+    /**
+     * Updates the metadata entry's entity id and returns the modified array.  If the entity id is __DYNAMIC:*__ a
+     * the current url is assigned.  If it is explicit the entityid array key is updated to the entityId that was
+     * provided.
+     *
+     * @param string $metadataSet a metadata set (saml20-idp-hosted, saml20-sp-remote, etc)
+     * @param string $entityId the entity id we are modifying
+     * @param array $metadataEntry the fully populated metadata entry
+     * @return array modified metadata to include the valid entityid
+     *
+     * @throws \Exception
+     */
+    protected function updateEntityID(string $metadataSet, string $entityId, array $metadataEntry): array
+    {
+        $modifiedMetadataEntry = $metadataEntry;
+
+        // generate a dynamic hosted url
+        if (preg_match('/__DYNAMIC(:[0-9]+)?__/', $entityId)) {
+            $modifiedMetadataEntry['entityid'] = $this->getDynamicHostedUrl($metadataSet);
+        } else {
+            // set the entityid metadata array key to the provided entity id
+            $modifiedMetadataEntry['entityid'] = $entityId;
+        }
+
+        return $modifiedMetadataEntry;
+    }
 }
-?>

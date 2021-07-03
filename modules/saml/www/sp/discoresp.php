@@ -4,34 +4,31 @@
  * Handler for response from IdP discovery service.
  */
 
+use SimpleSAML\Assert\Assert;
+use SimpleSAML\Auth;
+use SimpleSAML\Error;
+
 if (!array_key_exists('AuthID', $_REQUEST)) {
-	throw new SimpleSAML_Error_BadRequest('Missing AuthID to discovery service response handler');
+    throw new Error\BadRequest('Missing AuthID to discovery service response handler');
 }
 
 if (!array_key_exists('idpentityid', $_REQUEST)) {
-	throw new SimpleSAML_Error_BadRequest('Missing idpentityid to discovery service response handler');
+    throw new Error\BadRequest('Missing idpentityid to discovery service response handler');
 }
 
-$stateID = $_REQUEST['AuthID'];
+/** @var array $state */
+$state = Auth\State::loadState($_REQUEST['AuthID'], 'saml:sp:sso');
 
-// sanitize the input
-$sid = SimpleSAML_Utilities::parseStateID($stateID);
-if (!is_null($sid['url'])) {
-	SimpleSAML_Utilities::checkURLAllowed($sid['url']);
-}
-
-$state = SimpleSAML_Auth_State::loadState($stateID, 'saml:sp:sso');
-
-/* Find authentication source. */
-assert('array_key_exists("saml:sp:AuthId", $state)');
+// Find authentication source
+Assert::keyExists($state, 'saml:sp:AuthId');
 $sourceId = $state['saml:sp:AuthId'];
 
-$source = SimpleSAML_Auth_Source::getById($sourceId);
-if ($source === NULL) {
-	throw new Exception('Could not find authentication source with id ' . $sourceId);
+$source = Auth\Source::getById($sourceId);
+if ($source === null) {
+    throw new Exception('Could not find authentication source with id ' . $sourceId);
 }
-if (!($source instanceof sspmod_saml_Auth_Source_SP)) {
-	throw new SimpleSAML_Error_Exception('Source type changed?');
+if (!($source instanceof \SimpleSAML\Module\saml\Auth\Source\SP)) {
+    throw new Error\Exception('Source type changed?');
 }
 
 $source->startSSO($_REQUEST['idpentityid'], $state);

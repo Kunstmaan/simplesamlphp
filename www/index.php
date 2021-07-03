@@ -2,5 +2,7 @@
 
 require_once('_include.php');
 
+$config = \SimpleSAML\Configuration::getInstance();
+$httpUtils = new \SimpleSAML\Utils\HTTP();
 
-SimpleSAML_Utilities::redirectTrustedURL(SimpleSAML_Module::getModuleURL('core/frontpage_welcome.php'));
+$httpUtils->redirectTrustedURL(SimpleSAML\Module::getModuleURL('core/login'));

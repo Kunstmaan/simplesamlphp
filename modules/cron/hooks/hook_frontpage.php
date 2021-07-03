@@ -1,17 +1,19 @@
 <?php
+
+use SimpleSAML\Assert\Assert;
+use SimpleSAML\Module;
+
 /**
  * Hook to add the modinfo module to the frontpage.
  *
  * @param array &$links  The links on the frontpage, split into sections.
  */
-function cron_hook_frontpage(&$links) {
-	assert('is_array($links)');
-	assert('array_key_exists("links", $links)');
+function cron_hook_frontpage(array &$links): void
+{
+    Assert::keyExists($links, 'links');
 
-	$links['config'][] = array(
-		'href' => SimpleSAML_Module::getModuleURL('cron/croninfo.php'),
-		'text' => array('en' => 'Cron module information page'),
-	);
-
+    $links['config'][] = [
+        'href' => Module::getModuleURL('cron/info'),
+        'text' => '{cron:cron:link_cron}',
+    ];
 }
-?>

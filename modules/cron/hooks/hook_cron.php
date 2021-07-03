@@ -1,20 +1,21 @@
 <?php
+
+use SimpleSAML\Assert\Assert;
+use SimpleSAML\Configuration;
+
 /**
  * Hook to run a cron job.
  *
  * @param array &$croninfo  Output
  */
-function cron_hook_cron(&$croninfo) {
-	assert('is_array($croninfo)');
-	assert('array_key_exists("summary", $croninfo)');
-	assert('array_key_exists("tag", $croninfo)');
+function cron_hook_cron(array &$croninfo): void
+{
+    Assert::keyExists($croninfo, 'summary');
+    Assert::keyExists($croninfo, 'tag');
 
-	$cronconfig = SimpleSAML_Configuration::getConfig('module_cron.php');
-	
-	if ($cronconfig->getValue('debug_message', TRUE)) {
+    $cronconfig = Configuration::getConfig('module_cron.php');
 
-		$croninfo['summary'][] = 'Cron did run tag [' . $croninfo['tag'] . '] at ' . date(DATE_RFC822);
-	}
-
+    if ($cronconfig->getValue('debug_message', true)) {
+        $croninfo['summary'][] = 'Cron did run tag [' . $croninfo['tag'] . '] at ' . date(DATE_RFC822);
+    }
 }
-?>

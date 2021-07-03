@@ -1,15 +1,31 @@
 <?php
+
 require_once('../../_include.php');
 
-$metadata = SimpleSAML_Metadata_MetaDataStorageHandler::getMetadataHandler();
-$idpEntityId = $metadata->getMetaDataCurrentEntityID('saml20-idp-hosted');
-$idp = SimpleSAML_IdP::getById('saml2:' . $idpEntityId);
+use SimpleSAML\Assert\Assert;
+use SimpleSAML\Configuration;
+use SimpleSAML\Error;
+use SimpleSAML\IdP;
+use SimpleSAML\Logger;
+use SimpleSAML\Metadata;
+use SimpleSAML\Module;
+use SimpleSAML\Utils;
 
-SimpleSAML_Logger::info('SAML2.0 - IdP.initSLO: Accessing SAML 2.0 IdP endpoint init Single Logout');
+Logger::info('SAML2.0 - IdP.initSLO: Accessing SAML 2.0 IdP endpoint init Single Logout');
 
-if (!isset($_GET['RelayState'])) {
-	throw new SimpleSAML_Error_Error('NORELAYSTATE');
+$config = Configuration::getInstance();
+if (!$config->getBoolean('enable.saml20-idp', false) || !Module::isModuleEnabled('saml')) {
+    throw new Error\Error('NOACCESS', null, 403);
 }
 
-$idp->doLogoutRedirect(SimpleSAML_Utilities::checkURLAllowed((string)$_GET['RelayState']));
-assert('FALSE');
+$metadata = Metadata\MetaDataStorageHandler::getMetadataHandler();
+$idpEntityId = $metadata->getMetaDataCurrentEntityID('saml20-idp-hosted');
+$idp = IdP::getById('saml2:' . $idpEntityId);
+
+if (!isset($_GET['RelayState'])) {
+    throw new Error\Error('NORELAYSTATE');
+}
+
+$httpUtils = new Utils\HTTP();
+$idp->doLogoutRedirect($httpUtils->checkURLAllowed((string) $_GET['RelayState']));
+Assert::true(false);

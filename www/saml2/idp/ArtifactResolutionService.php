@@ -2,57 +2,84 @@
 
 /**
  * The ArtifactResolutionService receives the samlart from the sp.
- * And when the artifact is found, it sends a SAML2_ArtifactResponse.
+ * And when the artifact is found, it sends a \SAML2\ArtifactResponse.
  *
- * @author Danny Bollaert, UGent AS. <danny.bollaert@ugent.be>
- * @package simpleSAMLphp
+ * @package SimpleSAMLphp
  */
 
 require_once('../../_include.php');
 
-$config = SimpleSAML_Configuration::getInstance();
-if (!$config->getBoolean('enable.saml20-idp', FALSE)) {
-	throw new SimpleSAML_Error_Error('NOACCESS');
+use Exception;
+use SAML2\ArtifactResolve;
+use SAML2\ArtifactResponse;
+use SAML2\DOMDocumentFactory;
+use SAML2\SOAP;
+use SAML2\XML\saml\Issuer;
+use SimpleSAML\Assert\Assert;
+use SimpleSAML\Configuration;
+use SimpleSAML\Error;
+use SimpleSAML\Module;
+use SimpleSAML\Metadata;
+use SimpleSAML\Store;
+
+$config = Configuration::getInstance();
+if (!$config->getBoolean('enable.saml20-idp', false) || !Module::isModuleEnabled('saml')) {
+    throw new Error\Error('NOACCESS', null, 403);
 }
 
-$metadata = SimpleSAML_Metadata_MetaDataStorageHandler::getMetadataHandler();
+$metadata = Metadata\MetaDataStorageHandler::getMetadataHandler();
 $idpEntityId = $metadata->getMetaDataCurrentEntityID('saml20-idp-hosted');
 $idpMetadata = $metadata->getMetaDataConfig($idpEntityId, 'saml20-idp-hosted');
 
-if (!$idpMetadata->getBoolean('saml20.sendartifact', FALSE)) {
-	throw new SimpleSAML_Error_Error('NOACCESS');
+if (!$idpMetadata->getBoolean('saml20.sendartifact', false)) {
+    throw new Error\Error('NOACCESS');
 }
 
-$store = SimpleSAML_Store::getInstance();
-if ($store === FALSE) {
-	throw new Exception('Unable to send artifact without a datastore configured.');
+$store = Store::getInstance();
+if ($store === false) {
+    throw new Exception('Unable to send artifact without a datastore configured.');
 }
 
-$binding = new SAML2_SOAP();
-$request = $binding->receive();
-if (!($request instanceof SAML2_ArtifactResolve)) {
-	throw new Exception('Message received on ArtifactResolutionService wasn\'t a ArtifactResolve request.');
+$binding = new SOAP();
+try {
+    $request = $binding->receive();
+} catch (Exception $e) {
+    // TODO: look for a specific exception
+    // This is dirty. Instead of checking the message of the exception, \SAML2\Binding::getCurrentBinding() should throw
+    // an specific exception when the binding is unknown, and we should capture that here. Also note that the exception
+    // message here is bogus!
+    if ($e->getMessage() === 'Invalid message received to AssertionConsumerService endpoint.') {
+        throw new Error\Error('ARSPARAMS', $e, 400);
+    } else {
+        throw $e; // do not ignore other exceptions!
+    }
+}
+if (!($request instanceof ArtifactResolve)) {
+    throw new Exception('Message received on ArtifactResolutionService wasn\'t a ArtifactResolve request.');
 }
 
 $issuer = $request->getIssuer();
-$spMetadata = $metadata->getMetadataConfig($issuer, 'saml20-sp-remote');
-
+/** @psalm-assert \SAML2\XML\saml\Issuer $issuer */
+Assert::notNull($issuer);
+$issuer = $issuer->getValue();
+$spMetadata = $metadata->getMetaDataConfig($issuer, 'saml20-sp-remote');
 $artifact = $request->getArtifact();
-
 $responseData = $store->get('artifact', $artifact);
 $store->delete('artifact', $artifact);
 
-if ($responseData !== NULL) {
-	$document = new DOMDocument();
-	$document->loadXML($responseData);
-	$responseXML = $document->firstChild;
+if ($responseData !== null) {
+    $document = DOMDocumentFactory::fromString($responseData);
+    $responseXML = $document->documentElement;
 } else {
-	$responseXML = NULL;
+    $responseXML = null;
 }
 
-$artifactResponse = new SAML2_ArtifactResponse();
-$artifactResponse->setIssuer($idpEntityId);
+$artifactResponse = new ArtifactResponse();
+$issuer = new Issuer();
+$issuer->setValue($idpEntityId);
+$artifactResponse->setIssuer($issuer);
+
 $artifactResponse->setInResponseTo($request->getId());
 $artifactResponse->setAny($responseXML);
-sspmod_saml_Message::addSign($idpMetadata, $spMetadata, $artifactResponse);
+Module\saml\Message::addSign($idpMetadata, $spMetadata, $artifactResponse);
 $binding->send($artifactResponse);
